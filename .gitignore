@@ -1,0 +1,7 @@
+﻿node_modules
+*.log
+.cs-*
+restart-web.ps1
+dsh-web-restart.log*
+_webui.html
+_prev_session.jsonl

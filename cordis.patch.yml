@@ -1,0 +1,7 @@
+# dsh-code-studio bundle patch: inserts the Code Studio plugin row into the
+# web profile roster. Applied as a profile bundle layer (the dsh.bundle.patch
+# manifest field) over dsh-base; activate with
+#   dsh plugin --profile web add @windypro-rourou/dsh-code-studio
+- insert:
+    - id: code-studio
+      name: '@windypro-rourou/dsh-code-studio'
