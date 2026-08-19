@@ -1,7 +1,7 @@
 {
   "name": "@windypro-rourou/dsh-code-studio",
   "description": "Code Studio for DSH Web GUI — a VS Code + Cline hybrid: file tree, syntax-highlighted editor, and Cline-style line-by-line diffs that auto-appear when the agent edits files.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
