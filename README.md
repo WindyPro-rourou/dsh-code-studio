@@ -1,42 +1,43 @@
-# Code Studio 鈥?DSH Web GUI 鐨?VS Code + Cline 娣峰悎鎻掍欢
+# Code Studio — DSH Web UI 文件修改监视器 · 代码工作台
 
-鍦?DeepSeek Harness 鐨?Web 鐣岄潰锛坵ebui锛夐噷鐩存帴**娴忚銆佺紪杈戜唬鐮?*锛屽苟鍦?**Agent 淇敼鏂囦欢鏃跺儚 Cline 涓€鏍烽€愯鏄剧ず Diff**锛氭敼鍔ㄥ尯琛屽彿鍓嶆爣娉?`+`锛堟柊澧?缁胯壊锛夈€乣-`锛堝垹闄?绾㈣壊锛夈€乣~`锛堜慨鏀?榛勮壊锛夈€?
-## 鍔熻兘
+> A **file-change monitor & code editor** inside the DeepSeek Harness Web UI.
+> Watch agent edits land as line-by-line diffs in real time, right beside your
+> conversation — then open, edit and save any workspace file without leaving
+> the browser.
 
-- 鏂囦欢鏍戯細宸︿晶鎳掑姞杞界洰褰曟爲锛岀偣鍑绘枃浠舵墦寮€锛堟敮鎸佹墦寮€宸ヤ綔鍖轰换鎰忚矾寰勶級銆?- 缂栬緫鍣細甯﹁鍙风殑浠ｇ爜缂栬緫瑙嗗浘锛汣trl+S 淇濆瓨锛孋trl+D 鍦?缂栬緫/Diff 闂村垏鎹€?- Cline 寮?Diff锛欴iff 瑙嗗浘鎸夎鏄剧ず before/after锛涜鍙峰墠鏂规湁绗﹀彿鍒楋紙+ - ~锛夛紝鏈敼鍔ㄥぇ娈佃嚜鍔ㄦ姌鍙犱负銆屸嫰 N 琛屾湭鏀瑰姩銆嶏紝鍙偣鍑诲睍寮€鍏ㄩ儴銆?- Agent 鍙樻洿璺熻釜锛欻ost 渚ч€掑綊鐩戝惉宸ヤ綔鍖猴紙fs.watch + mtime 杞鍏滃簳锛夛紝Agent 鍐欏叆鏂囦欢鍚庢祻瑙堝櫒瀹炴椂鏀跺埌浜嬩欢锛涙枃浠舵爲椤堕儴銆孉gent 鍙樻洿銆嶅垪琛ㄦ樉绀烘湁鍙樻洿鐨勬枃浠讹紙缁?鏂板缓銆侀粍=淇敼銆佺孩=鍒犻櫎锛夛紝鐐瑰嚮鍗崇湅 Diff銆?- 鍙樻洿鍘嗗彶锛氭瘡涓枃浠朵繚鐣欐渶杩?30 鏉?before/after 璁板綍锛?api/code-studio/history锛夈€?- 鍙岀鎻掍欢锛欻ost锛圢ode锛夋彁渚?/api/code-studio/* REST + SSE锛汣lient锛堟祻瑙堝櫒 bundle锛夋彁渚?UI銆?
-## 瀹夎锛堝凡瑁呭ソ锛?
-鎻掍欢宸插畨瑁呭埌 web profile锛?DSH_HOME/profiles/web锛夛細
-- 鍖呬綅浜?profiles/web/node_modules/@windypro-rourou/dsh-code-studio
-- cordis.patch.yml 宸叉彃鍏?code-studio 琛?- package.json 宸插姞鍏?link:F:/CycleMaster/dsh-code-studio 渚濊禆
+在 DeepSeek Harness 的 Web 界面里，实时监视 Agent 对文件的每一次修改：**改动落盘的瞬间**，逐行 Diff（`+` 新增 / `−` 删除 / `~` 修改）自动浮现在你的会话旁；内置语法高亮编辑器，随时查看和修改工作区文件。**不用离开 DSH，Agent 改了哪里、改了什么，一目了然。**
 
-**鐢熸晥鏃舵満**锛欴SH 鐨勫鎴风鎻掍欢鍚嶅崟锛坆oot manifest锛夊湪鍚姩鏃跺浐鍖栵紝鏂版彃浠堕渶瑕?*閲嶅惎 dsh web**锛堟垨涓嬫鍚姩 harness锛夊悗鍑虹幇鍦ㄤ晶杈规爮銆傚綋鍓嶆鍦ㄨ繍琛岀殑 webui 鏃犳硶鐑姞杞芥柊鎻掍欢锛堣繖鏄钩鍙版満鍒讹紝闈炴彃浠剁己闄凤級銆?
-### 鎵嬪姩瀹夎锛堝叾浠栨満鍣級
+## 核心价值
 
-```powershell
-# 1. 鐢ㄥ畼鏂瑰懡浠ら摼鎺ユ彃浠讹紙浼氳嚜鍔ㄦ妸瀹冨姞鍏?profile bundles 灞傦級
-dsh plugin --profile web add link:F:/CycleMaster/dsh-code-studio
+- 🔭 **实时文件修改监视**：基于会话工具事件直推，Agent 每次 write / edit 完成立即推送 Diff —— 不依赖文件系统轮询，不漏报、不延迟。
+- 🗂 **多工作区覆盖**：自动监视所有会话的工作区目录，Agent 在任意目录改文件都能捕获。
+- 🔒 **按会话隔离**：每个 Code Studio 只响应当前会话的修改，切换会话互不干扰。
+- 🧠 **会话状态记忆**：变更列表、打开的标签、面板宽度按会话分别保留（本地持久化）。
+- 📝 **语法高亮编辑器**：类编辑器体验，行号、光标、滚动同步；`Ctrl+S` 保存，`Ctrl+D` 查看 Diff。
+- 📐 **可拖拽面板**：宽度自由调整并记住；UI 与 DSH 主题完全一致（`--dsw-alias-*` 令牌）。
 
-# 2. 鎴栬€呭湪 profiles/web/cordis.patch.yml 杩藉姞锛?# - insert:
-#     - id: code-studio
-#       name: '@windypro-rourou/dsh-code-studio'
+## 安装
+
+```sh
+dsh plugin --profile web add @windypro-rourou/dsh-code-studio
+# 或使用 GitHub 源
+dsh plugin --profile web add github:WindyPro-rourou/dsh-code-studio
 ```
 
-### 鐜板湪灏辨兂棰勮锛?
-```powershell
-dsh web --port 3081   # 浼氱湅鍒颁晶杈规爮鍑虹幇 "Code Studio" 鍏ュ彛
-```
+重启 `dsh web` 后，左侧边栏出现 **Code Studio** 入口。
 
-## 浣跨敤
+## 使用
 
-1. 鍒锋柊椤甸潰鍚庯紝宸︿晶杈规爮鍑虹幇 **Code Studio** 鍏ュ彛锛堜唬鐮佸浘鏍囷級銆?2. 鐐瑰嚮鎵撳紑鍏ㄥ睆闈㈡澘锛氬乏渚ф枃浠舵爲锛屼腑闂存爣绛鹃〉缂栬緫鍣ㄣ€?3. 璁?Agent 淇敼浠ｇ爜锛堝啓鏂囦欢/缂栬緫锛夛紝闈㈡澘椤堕儴銆孉gent 鍙樻洿銆嶅疄鏃跺垪鍑哄彉鍖栨枃浠躲€?4. 鐐瑰嚮鍙樻洿鏂囦欢 鈫?榛樿杩涘叆 Diff 瑙嗗浘锛氳鍙峰墠绗﹀彿 + 棰滆壊鑳屾櫙锛屼竴鐩簡鐒躲€?
-## 蹇嵎閿?
-| 鎸夐敭 | 鍔熻兘 |
-| --- | --- |
-| Ctrl+S | 淇濆瓨褰撳墠鏂囦欢 |
-| Ctrl+D | 鍒囨崲 缂栬緫 / Diff 瑙嗗浘 |
+1. 打开 Code Studio（右侧面板，可拖左缘调宽）。
+2. 让 Agent 修改代码 —— 面板**自动浮现**该文件的逐行 Diff：行号前 `+`（绿）/ `−`（红）/ `~`（黄），未改动大段自动折叠。
+3. 「文件」页签：浏览工作区、打开文件、直接编辑保存（`Ctrl+S`）。
 
-## 鎶€鏈鏄?
-- Host锛歭ib/index.js 鈥?webServer.register 娉ㄥ唽 6 涓矾鐢憋紱fs.watch(recursive) + 1500ms mtime 杞锛涘姣忎釜鏂囦欢缁存姢鍩虹嚎蹇収锛屼粠鑰屼骇鍑虹簿纭殑 before/after銆?- Client锛歭ib/client.js 鈥?绾祻瑙堝櫒 bundle锛坵indow.__ModuleLoader__.load锛夛紝浠呬緷璧?react/react-dom锛涜嚜甯?LCS 琛岀骇 diff 寮曟搸涓庢牱寮忋€?- 璺緞瀹夊叏锛欰PI 浠呮帴鍙?loopback + 鍚屾簮鏍囪璇锋眰銆?
-## 宸茬煡闄愬埗
+## 技术说明
 
-- 鍗曟枃浠?> 512KB 涓嶈鍙栧唴瀹癸紙闃叉祻瑙堝櫒鍗℃锛夛紝浣嗕細鏍囪銆屾枃浠惰繃澶с€嶃€?- Diff 瑙嗗浘閽堝銆屾墦寮€鍚?涓婃璇诲彇鍚庛€嶇殑鍙樻洿鍋氬熀绾垮姣旓紝绗﹀悎 Cline 鐨勪細璇濊涔夈€?
+- **Host**（`lib/index.js`）：监听 `session/event` 工具事件（`tool/call` ↔ `tool/result` 配对），对写文件工具即时读取并推送 before/after；递归文件监视 + mtime 轮询兜底；`/api/code-studio/*` REST + SSE。
+- **Client**（`lib/client.js`）：浏览器 bundle，仅依赖 react；LCS 行级 Diff 引擎、语法高亮、按会话状态管理。
+
+## 已知限制
+
+- 单文件 > 512KB 不读取内容（防浏览器卡顿）。
+- 通过 bash/pwsh 等非文件工具写入的变更依赖文件监视兜底（仍会捕获，可能有少量延迟）。
