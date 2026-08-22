@@ -26,6 +26,11 @@ dsh plugin --profile web add github:WindyPro-rourou/dsh-code-studio
 
 重启 `dsh web` 后，左侧边栏出现 **Code Studio** 入口。
 
+## 兼容性
+
+- 验证版本：**DSH ≥ 0.1.1-rc.2**（`@deepseek-ai/dsh`、`dsh-web-app`、`dsh-base`、`dsh-client-runtime`）。
+- 依赖的 API：`webServer.register`、`session/event`（`tool/call` / `tool/result`）、`sessions.list()`、客户端 `slots` 服务 —— 在 0.1.1-rc.2 中均保持兼容。
+
 ## 使用
 
 1. 打开 Code Studio（右侧面板，可拖左缘调宽）。
