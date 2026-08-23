@@ -1,58 +1,58 @@
 {
-    "name":  "@windypro-rourou/dsh-code-studio",
-    "description":  "File-change monitor \u0026 code editor for the DSH Web UI: watch agent edits land as line-by-line diffs in real time, right beside your conversation, then view and edit any workspace file without leaving the browser.",
-    "version":  "0.1.5",
-    "type":  "module",
-    "main":  "lib/index.js",
-    "types":  "lib/types/index.d.ts",
-    "exports":  {
-                    ".":  {
-                              "types":  "./lib/types/index.d.ts",
-                              "default":  "./lib/index.js"
-                          },
-                    "./client":  {
-                                     "types":  "./lib/types/client/index.d.ts",
-                                     "default":  "./lib/client.js"
-                                 },
-                    "./package.json":  "./package.json"
-                },
-    "dsh":  {
-                "bundle":  {
-                               "patch":  "./cordis.patch.yml"
-                           },
-                "client":  {
-                               "inject":  [
-                                              "@deepseek-ai/dsh-client-runtime"
-                                          ],
-                               "platform":  "web"
-                           }
-            },
-    "keywords":  [
-                     "dsh-plugin",
-                     "dsh",
-                     "deepseek-harness",
-                     "code-studio",
-                     "cline",
-                     "diff",
-                     "editor",
-                     "web-ui"
-                 ],
-    "repository":  {
-                       "type":  "git",
-                       "url":  "git+https://github.com/windypro-rourou/dsh-code-studio.git"
-                   },
-    "peerDependencies":  {
-                             "@deepseek-ai/cordis":  "^4.0.1",
-                             "react":  "^18.2.0",
-                             "@deepseek-ai/dsh-client-runtime":  "^0.1.0-rc.8",
-                             "@deepseek-ai/dsh-client-connection":  "^0.1.0-rc.8"
-                         },
-    "files":  [
-                  "lib/**/*.js",
-                  "lib/**/*.d.ts",
-                  "cordis.patch.yml",
-                  "README.md",
-                  "scripts"
-              ],
-    "license":  "MIT"
+    "name": "@windypro-rourou/dsh-code-studio",
+    "description": "File-change monitor & code editor for the DSH Web UI: watch agent edits land as line-by-line diffs in real time, right beside your conversation, then view and edit any workspace file without leaving the browser.",
+    "version": "0.2.0",
+    "type": "module",
+    "main": "lib/index.js",
+    "types": "lib/types/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./lib/types/index.d.ts",
+            "default": "./lib/index.js"
+        },
+        "./client": {
+            "types": "./lib/types/client/index.d.ts",
+            "default": "./lib/client.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "dsh": {
+        "bundle": {
+            "patch": "./cordis.patch.yml"
+        },
+        "client": {
+            "inject": [
+                "@deepseek-ai/dsh-client-runtime"
+            ],
+            "platform": "web"
+        }
+    },
+    "keywords": [
+        "dsh-plugin",
+        "dsh",
+        "deepseek-harness",
+        "code-studio",
+        "cline",
+        "diff",
+        "editor",
+        "web-ui"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/windypro-rourou/dsh-code-studio.git"
+    },
+    "peerDependencies": {
+        "@deepseek-ai/cordis": "^4.0.1",
+        "react": "^18.2.0",
+        "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.8",
+        "@deepseek-ai/dsh-client-connection": "^0.1.0-rc.8"
+    },
+    "files": [
+        "lib/**/*.js",
+        "lib/**/*.d.ts",
+        "cordis.patch.yml",
+        "README.md",
+        "scripts"
+    ],
+    "license": "MIT"
 }
