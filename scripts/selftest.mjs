@@ -1,6 +1,7 @@
 // selftest.mjs - zero-dependency sanity checks for the code-studio host half.
 // Run: node scripts/selftest.mjs  (needs a writable temp dir; cleans up after)
 import { mkdtemp, writeFile, readFile, rm, stat, unlink } from "node:fs/promises";
+import * as fs2 from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -110,6 +111,28 @@ ok((await ledger.history.get(f3) ?? []).some((e) => e.source === "revert"), "rev
 res = mockRes();
 await rev.handler(mockReq("POST", "/revert", { path: join(ROOT, "never.txt") }), res);
 ok(res.status === 404, "no-revert-point -> 404");
+
+// Bug A regression: captureRevertPoint seeds the baseline so the first diff
+// after the agent's write shows the real before-content, not "all new"
+const f4 = join(ROOT, "seed.txt");
+await writeFile(f4, "original\n", "utf8");
+await ledger.captureRevertPoint(f4, "s9");
+ok(ledger.snapshot(f4)?.content === "original\n", "revert point seeds baseline");
+await writeFile(f4, "changed\n", "utf8");
+ledger.claim(f4, "s9");
+await ledger.handleChange(f4);
+const h4 = ledger.history.get(f4) ?? [];
+ok(h4.length === 1 && h4[0].before === "original\n" && h4[0].after === "changed\n", "first diff carries real before (not all-new)");
+// same-session second capture must NOT re-seed (keeps the original)
+await ledger.captureRevertPoint(f4, "s9");
+ok(ledger.snapshot(f4)?.content === "changed\n", "second capture same session keeps current baseline");
+// oversize file: no baseline seed, no revert content
+const bigF = join(ROOT, "big.bin");
+const bigBuf = Buffer.alloc(600 * 1024, 65);
+await fs2.writeFile(bigF, bigBuf);
+await ledger.captureRevertPoint(bigF, "s9");
+ok(ledger.revertPoints.get(bigF)?.existed === true && ledger.revertPoints.get(bigF)?.content === null, "oversize file: revert point exists but no content");
+ok(ledger.snapshot(bigF) === void 0, "oversize file: no baseline seed");
 
 console.log("== workspaces ==");
 ledger.noteSessionRoot(ROOT, "s1");
