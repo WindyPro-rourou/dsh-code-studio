@@ -40,7 +40,7 @@ dsh plugin --profile web add github:WindyPro-rourou/dsh-code-studio
 
 ## 使用
 
-1. 打开 Code Studio（右侧面板，可拖左缘调宽；`Ctrl+Alt+C` 快捷开关）。
+1. 打开 Code Studio：**对话头部**（会话标题右侧工具栏，和宿主的「打开方式」按钮同一排）常驻一枚变更胶囊 —— 显示当前会话 `N 个文件已变更 +A −D`，点主体开关右侧面板、点 `⌄` 展开变更文件清单并直接跳到某个文件的 Diff；也可用侧边栏入口或 `Ctrl+Alt+C`。面板可拖左缘调宽。
 2. 让 Agent 修改代码 —— 面板**自动浮现**该文件的逐行 Diff：行号前 `+`（绿）/ `−`（红）/ `~`（黄），未改动大段自动折叠；面板关闭时侧边栏入口显示未查看变更数徽标。
 3. 对不满意的修改点「还原」，一键回到 Agent 动手前；点「历史」回放该文件的每一次改动。
 4. 「文件」页签：切换工作区、浏览文件树、打开文件直接编辑保存（`Ctrl+S`），或「发送到会话」让 Agent 接着改。
@@ -49,8 +49,8 @@ dsh plugin --profile web add github:WindyPro-rourou/dsh-code-studio
 ## 技术说明
 
 - **Host**（`lib/index.js`）：监听 `session/event` 工具事件（`tool/call` ↔ `tool/result` 配对），在 `tool/call` 阶段抓取还原点快照、在 `tool/result` 阶段即时读取并推送 before/after；递归文件监视 + mtime 轮询兜底；SSE 事件带自增 `id` 并保留 200 条环形缓冲用于 `Last-Event-ID` 断线补发；`/api/code-studio/*` REST + SSE（含 `/revert`、`/workspaces`、`/history`）。
-- **Client**（`lib/client.js`）：浏览器 bundle，仅依赖 react；LCS 行级 Diff 引擎（大文件自动退化贪心算法）、窗口化虚拟滚动、语法高亮、按会话状态管理、未读徽标。
-- **自测**：`node scripts/selftest.mjs`（host 逻辑 21 项断言）、`node scripts/smoke-client.mjs`（浏览器 bundle 冒烟）。
+- **Client**（`lib/client.js`）：浏览器 bundle，仅依赖 react；LCS 行级 Diff 引擎（大文件自动退化贪心算法）、窗口化虚拟滚动、语法高亮、按会话状态管理、未读徽标。UI 走宿主设计系统 —— 优先复用宿主暴露的 `@deepseek-ai/dsh-client-ui-primitives`（Button / Pill / Menu / Tooltip / 图标）并统一使用 `--dsw-alias-*`、`--dsh-scrollbar-*` 主题变量；该 UI 包不可用时自动降级为内置 token 化标记，功能不受影响。
+- **自测**：`node scripts/selftest.mjs`（host 逻辑 26 项断言）、`node scripts/apply-toolargs.mjs`（工具参数回归）、`node scripts/smoke-client.mjs`（浏览器 bundle 冒烟 + 头部胶囊插槽断言）。
 
 ## 已知限制
 
@@ -58,6 +58,12 @@ dsh plugin --profile web add github:WindyPro-rourou/dsh-code-studio
 - 通过 bash/pwsh 等非文件工具写入的变更依赖文件监视兜底（仍会捕获，可能有少量延迟），且仅显示 Agent 声明过的文件。
 - 还原点保存在内存中，服务重启后丢失（新会话的 Agent 修改会重新建立还原点）。
 
+
+## v0.2.8 — 头部变更胶囊 · DSH 设计系统
+
+- 变更提示从**右下角浮窗**（会压住输入框/发送工具条）迁移到**对话头部工具栏**：新增 `conversation.session.header.utilities` 插槽胶囊，`N 个文件已变更 +A −D`，主体开关面板、`⌄` 打开变更文件清单（点选直达该文件 Diff）。
+- 面板关闭时不再渲染任何浮动元素；未读变更靠头部胶囊圆点 + 侧边栏徽标表达。
+- UI 全面对齐 DSH 设计系统：复用宿主 UI 组件库、统一主题变量、宿主同款滚动条/焦点环/过渡。
 
 ##  v0.2.3 — 交互增强
 
