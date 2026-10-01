@@ -3,9 +3,9 @@
 import { mkdtemp, writeFile, readFile, rm, stat, unlink } from "node:fs/promises";
 import * as fs2 from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, parse as parsePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { FileLedger, makeRoutes } from "../lib/index.js";
+import { FileLedger, makeRoutes, apply, mapPortablePath, indexedWorkspaces, dshDrive } from "../lib/index.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = await mkdtemp(join(tmpdir(), "cs-selftest-"));
@@ -143,10 +143,147 @@ await ws.handler(mockReq("GET", "/workspaces"), res);
 const w = JSON.parse(res.body);
 ok(w.ok && w.workspaces.length === 1 && w.workspaces[0].path === ROOT && w.workspaces[0].sessionCount === 2, "workspaces lists root with session count");
 
+// Portable drive (随盘): DSH stores workspace paths absolutely, so a drive-letter
+// change must be repaired with exactly the launcher's own rule — keep the path when
+// it exists, otherwise re-anchor the same path on DSH's drive, and only when that
+// folder is really there. Without this a workspace shows an empty file tree.
+console.log("== portable drive rewrite (随盘) ==");
+const PORT_HOME = await mkdtemp(join(tmpdir(), "cs-home-"));
+process.env.DSH_HOME = PORT_HOME;
+const homeDrive = parsePath(PORT_HOME).root.slice(0, 2).toUpperCase();
+ok(dshDrive() === homeDrive, "dshDrive() reads the drive of DSH_HOME");
+const realProj = await mkdtemp(join(PORT_HOME, "proj-"));
+const ghostDrive = homeDrive === "Z:" ? "Y:" : "Z:";
+const ghostPath = ghostDrive + realProj.slice(homeDrive.length);
+ok(mapPortablePath(realProj) === realProj, "an existing workspace path is kept as-is");
+ok(mapPortablePath(ghostPath) === realProj, "a path on a vanished drive re-anchors onto DSH's drive when the folder exists there");
+ok(mapPortablePath(ghostDrive + "\\definitely\\not\\here") === ghostDrive + "\\definitely\\not\\here", "a path that exists nowhere is reported unchanged, never invented");
+// workspace index (storages/workspace.json) is the portable registry: both a
+// drive-corrected row and a dead row must come through honestly
+await fs2.mkdir(join(PORT_HOME, "storages"), { recursive: true });
+await writeFile(join(PORT_HOME, "storages", "workspace.json"), JSON.stringify({
+  tables: { workspaces: {
+    w1: { path: ghostPath, title: "moved project" },
+    w2: { path: ghostDrive + "\\gone", title: "dead project" }
+  } }
+}), "utf8");
+const indexed = indexedWorkspaces();
+const row1 = indexed.find((x) => x.id === "w1");
+const row2 = indexed.find((x) => x.id === "w2");
+ok(row1 !== void 0 && row1.path === realProj && row1.recorded === ghostPath && row1.exists === true, "indexed workspace is re-anchored and marked existing");
+ok(row2 !== void 0 && row2.exists === false && row2.path === ghostDrive + "\\gone", "a missing indexed workspace keeps its recorded path and is marked missing");
+// /root must report the rewrite so the UI can explain it
+const portRoutes = makeRoutes(ledger, (id) => mapPortablePath(ghostPath), ROOT, () => indexed, (id) => ({ path: mapPortablePath(ghostPath), recorded: ghostPath, sessionId: id }));
+res = mockRes();
+await route(portRoutes, "/root").handler(mockReq("GET", "/root?session=sP"), res);
+const pr = JSON.parse(res.body);
+ok(pr.ok && pr.root === realProj && pr.recorded === ghostPath && pr.remapped === true && pr.exists === true, "/root reports the drive rewrite (root/recorded/remapped/exists)");
+
 console.log("== guard ==");
 res = mockRes();
 const evil = mockReq("POST", "/revert", { path: f2 }); evil.socket.remoteAddress = "8.8.8.8"; await rev.handler(evil, res);
 ok(res.status === 403, "non-loopback rejected");
+
+// DSH 0.2: the workspace root follows the SESSION, not the host's cwd. The desktop
+// app used to report its own profile folder as the workspace because it resolved
+// process.cwd() once at startup.
+console.log("== session-scoped root (0.2) ==");
+const ROOT_B = await mkdtemp(join(tmpdir(), "cs-ws-b-"));
+const calls = [];
+const resolver = (sessionId) => { calls.push(sessionId); const r = sessionId === "sB" ? ROOT_B : ROOT; ledger.addRoot(r); return r; };
+const routes2 = makeRoutes(ledger, resolver, ROOT, () => [
+  { path: ROOT, label: "a", sessionCount: 1 },
+  { path: ROOT_B, label: "b", sessionCount: 1 }
+]);
+const rootRoute = route(routes2, "/root");
+res = mockRes();
+await rootRoute.handler(mockReq("GET", "/root?session=sB"), res);
+const rb = JSON.parse(res.body);
+ok(rb.ok && rb.root === ROOT_B && calls.includes("sB"), "/root?session=<id> resolves that session's project dir");
+ok(ledger.roots.has(ROOT_B), "resolved session root gets watched");
+res = mockRes();
+await rootRoute.handler(mockReq("GET", "/root"), res);
+ok(JSON.parse(res.body).root === ROOT, "/root without a session falls back to the configured root");
+res = mockRes();
+await route(routes2, "/workspaces").handler(mockReq("GET", "/workspaces"), res);
+const w2 = JSON.parse(res.body);
+ok(w2.workspaces.some((x) => x.path === ROOT_B), "/workspaces lists live session project dirs");
+await rm(ROOT_B, { recursive: true, force: true });
+
+// End-to-end: the real apply() must resolve the workspace from the ACTIVE SESSION.
+// Regression for the desktop bug where the file browser opened the app's own
+// profile folder (the host's process.cwd()) instead of the project directory.
+console.log("== apply(): session-scoped workspace (desktop bug) ==");
+const PROJ_A = await mkdtemp(join(tmpdir(), "cs-proj-a-"));
+const PROJ_B = await mkdtemp(join(tmpdir(), "cs-proj-b-"));
+await writeFile(join(PROJ_B, "main.js"), "// project file\n", "utf8");
+const registeredRoutes = [];
+const toolEvents = [];
+const applyCtx = {
+  effect(fn) { const d = fn(); return () => { if (typeof d === "function") d(); }; },
+  on(ev, fn) { toolEvents.push(ev); return () => {}; },
+  get(name) {
+    if (name === "sessions") return { list: () => ([
+      { id: "sA", header: { cwd: PROJ_A } },
+      { id: "sB", header: { cwd: PROJ_B } }
+    ]) };
+    return void 0;
+  },
+  webServer: { register(route) { registeredRoutes.push(route); return () => {}; } }
+};
+apply(applyCtx, { pollIntervalMs: 10 ** 7 });
+const appliedRoot = registeredRoutes.find((r) => r.path === PREFIX + "/root");
+ok(appliedRoot !== void 0, "apply() registers /root");
+res = mockRes();
+await appliedRoot.handler(mockReq("GET", "/root?session=sB"), res);
+const appliedBody = JSON.parse(res.body);
+ok(appliedBody.root === PROJ_B, "apply(): /root?session=sB returns that session's project dir");
+res = mockRes();
+await appliedRoot.handler(mockReq("GET", "/root?session=sA"), res);
+ok(JSON.parse(res.body).root === PROJ_A, "apply(): /root?session=sA returns the other session's project dir");
+res = mockRes();
+await registeredRoutes.find((r) => r.path === PREFIX + "/tree").handler(mockReq("GET", "/tree"), res);
+const treeBody = JSON.parse(res.body);
+ok(treeBody.ok && treeBody.path === PROJ_B, "apply(): /tree defaults to the newest live session's dir, not the host cwd");
+ok(treeBody.entries.length >= 1, "apply(): tree lists that directory's entries");
+ok(toolEvents.includes("session/event"), "apply(): subscribes to session/event");
+await rm(PROJ_A, { recursive: true, force: true });
+await rm(PROJ_B, { recursive: true, force: true });
+
+// The same apply(), but the active session's recorded folder is gone for good
+// (another machine / deleted): the browser must fall back to a workspace that really
+// exists instead of showing an empty tree, and must say so.
+console.log("== apply(): missing session folder falls back (随盘) ==");
+const LIVE = await mkdtemp(join(tmpdir(), "cs-live-"));
+await writeFile(join(LIVE, "keep.js"), "// still here\n", "utf8");
+const goneProj = join(tmpdir(), "cs-gone-" + Date.now() + "-" + Math.random().toString(16).slice(2));
+const routes3 = [];
+const ctx3 = {
+  effect(fn) { const d = fn(); return () => { if (typeof d === "function") d(); }; },
+  on() { return () => {}; },
+  get(name) {
+    if (name === "sessions") return { list: () => ([{ id: "sDead", header: { cwd: goneProj } }]) };
+    return void 0;
+  },
+  webServer: { register(route) { routes3.push(route); return () => {}; } }
+};
+process.env.DSH_HOME = PORT_HOME; // an indexed workspace that exists is the fallback
+await writeFile(join(PORT_HOME, "storages", "workspace.json"), JSON.stringify({
+  tables: { workspaces: {
+    newestButGone: { path: ghostDrive + "\\also\\gone", title: "newest but missing", updatedAt: "2030-01-01T00:00:00.000Z" },
+    live: { path: LIVE, title: "live project", updatedAt: "2026-01-01T00:00:00.000Z" }
+  } }
+}), "utf8");
+apply(ctx3, { pollIntervalMs: 10 ** 7 });
+res = mockRes();
+await routes3.find((r) => r.path === PREFIX + "/root").handler(mockReq("GET", "/root?session=sDead"), res);
+const dead = JSON.parse(res.body);
+ok(dead.root === LIVE, "apply(): a session whose folder is gone falls back to the newest EXISTING workspace");
+ok(dead.recorded === goneProj && dead.sessionMissing === true && dead.exists === true, "apply(): /root reports the missing session folder and the fallback");
+res = mockRes();
+await routes3.find((r) => r.path === PREFIX + "/tree").handler(mockReq("GET", "/tree"), res);
+ok(JSON.parse(res.body).entries.some((e) => e.name === "keep.js"), "apply(): the fallback tree really lists files");
+await rm(LIVE, { recursive: true, force: true });
 
 await rm(ROOT, { recursive: true, force: true });
 console.log("\n" + passed + " passed, " + failed + " failed");

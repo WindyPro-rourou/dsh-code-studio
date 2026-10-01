@@ -35,8 +35,16 @@ dsh plugin --profile web add github:WindyPro-rourou/dsh-code-studio
 
 ## 兼容性
 
-- 验证版本：**DSH ≥ 0.1.1-rc.2**（`@deepseek-ai/dsh`、`dsh-web-app`、`dsh-base`、`dsh-client-runtime`）。
-- 依赖的 API：`webServer.register`、`session/event`（`tool/call` / `tool/result`）、`sessions.list()`、客户端 `slots` 服务 —— 在 0.1.1-rc.2 中均保持兼容。
+- 验证版本：**DSH 0.2.0-rc.2（含 0.2 桌面端）**，并向下兼容 **DSH ≥ 0.1.1-rc.2**。
+- 依赖的 API：`webServer.register`、`session/event`（`tool/call` / `tool/result`）、`sessions.list()`、客户端 `slots`（`shell.overlay` + `conversation.session.header.utilities`）—— 在 0.2 中均保持兼容。
+- **0.2 插件兼容性预检**：0.2 会拒绝 `peerDependencies` 中 `@deepseek-ai/dsh-*` 不满足当前运行时版本、且未在 `profiles/<profile>/compatibility.json` 里逐条“接受风险”的插件。本插件不再声明 0.1 时代的 `@deepseek-ai/dsh-client-runtime` / `dsh-client-connection`（0.2 已不存在这两个包），因此**无需任何风险豁免即可加载**。
+
+## 0.2 桌面端适配（v0.2.9 → v0.2.12）
+
+- **面板形态：保持覆盖型浮层侧栏**（`shell.overlay`，浮在对话右缘、拖左缘调宽、✕ 关闭、`Ctrl+Alt+C` 开关）—— 与 0.1.x 完全一致。0.2 的 `sidebar.right.pane.tab` 会把面板变成右栏页签（桌面端上还会另开一个面板窗口），**已经试过并回退**（见 v0.2.12）。
+- **变更引擎与 UI 解耦**：面板实例挂在 `shell.overlay`；SSE 变更流由 `startChangeFeed()` 引用计数共享，面板关闭时事件流照跑，头部胶囊照常计数。
+- **工作区按会话解析 + 随盘适配**：`/root`、`/tree`、`/workspaces` 从当前会话的 `header.cwd` 解析（0.2 的项目目录绑定在会话上），并套用便携版的「同盘换盘符」规则（`launcher/fix-workspace-paths.mjs` 的 `mapPath()`），换盘符后工作区文件照样显示；会话目录彻底不存在时回退到最新存在的索引工作区并在界面说明。
+- 0.2 桌面端是 `data-windows-titlebar` 布局，左侧栏入口仍用原有的 DOM 注入方式（与 Logcat / 嘉立创 EDA 一致，实测工作正常）。
 
 ## 使用
 
@@ -58,6 +66,39 @@ dsh plugin --profile web add github:WindyPro-rourou/dsh-code-studio
 - 通过 bash/pwsh 等非文件工具写入的变更依赖文件监视兜底（仍会捕获，可能有少量延迟），且仅显示 Agent 声明过的文件。
 - 还原点保存在内存中，服务重启后丢失（新会话的 Agent 修改会重新建立还原点）。
 
+
+## v0.2.13 — 适配便携版「随盘」特性
+
+- **同盘换盘符改写**：DSH 把工作区路径**绝对**存进会话头与 `storages/workspace.json`，而整个便携包可以换盘符。现在插件的 `/root`、`/tree`、`/workspaces` 与会话监听都走 `mapPortablePath()` —— 与 `launcher/fix-workspace-paths.mjs` **完全同一条规则**：路径存在就用原路径；否则把同样的路径（去掉盘符）重新锚到 **DSH 自己所在盘**（`DSH_HOME` 的盘符），且**只有那个目录真的存在时才改**。
+- **工作区索引接入**：`/workspaces` 合并 DSH 自己的便携索引 `storages/workspace.json`（按 `updatedAt` 新的在前，含"目录不存在"标记），所以换盘后不会只剩一个空目录。
+- **会话目录彻底不存在时兜底**：记录指向别的电脑/已删除目录的会话，不再给你一个空树 —— 自动回退到**最新的、真实存在的工作区**，并在界面上说明（`/root` 返回 `recorded` / `remapped` / `sessionMissing` / `exists`）。
+- **界面提示**：「文件」页签顶部会显示「随盘：盘符已改变，路径按同盘规则改写到 …（记录的是 …）」，或「该会话记录的项目目录不存在，已回退到 …；换盘符后请运行「整理工作区分组.cmd」」，工作区下拉里不存在的目录也会标注。
+- 实测（本机 130 份会话头 / 22 条工作区索引）：当前盘符已是 `F:`，改写成 no-op（正确）；9 份属于别的电脑的会话如实标注、绝不臆造路径。
+
+## v0.2.12 — 回退：面板仍是覆盖型浮层侧栏
+
+- **回退 v0.2.9~v0.2.11 的插槽改造**：面板重新挂回 `shell.overlay`（浮在对话右缘的覆盖型侧栏，拖左缘调宽、✕ 关闭），左侧栏入口恢复原有的 DOM 注入 —— 与 0.1.x 一致。
+- 原因：0.2 的 `sidebar.right.pane.tab` / `main` 会把它变成右栏页签或中央面板（桌面端上还会另开一个面板窗口），都不是这个面板该有的形态。
+- **保留**：包声明适配（去掉 0.2 已不存在的 peer / `dsh.client.inject`，无需风险豁免）、工作区按会话解析、`✕` 关闭按钮、引用计数共享的 SSE 变更流、窄宽度下自适应的状态栏、切会话重解析工作区。
+- **修「关不掉」**：0.2 桌面端（Windows）把窗口标题栏画成页面里的固定层，而 `shell.overlay` 是 `inset:0` 的绝对层（连 `data-windows-titlebar` 那 40px 标题栏带一起覆盖）—— 面板顶行正好压在窗口控制按钮底下，`✕` 被挡住点不到（窗口越窄越明显，看起来甚至像"面板跑到独立窗口里了"）。现在面板在标题栏模式下按宿主自己的 `--dsh-windows-titlebar-height` 让到标题栏下方，`✕` 也提到上层；并且 **`Esc` 随时关闭面板**（✕ / `Ctrl+Alt+C` / 头部胶囊同样有效）。
+
+## v0.2.11 — 右侧边栏页签（已回退，见 v0.2.12）
+
+- **改成官方右侧边栏页签**（和「文件 / 终端 / 浏览器」同一种面板）：注册页签类型（`ctx.sidebarRightTabs.register({ id, kind, title })`）+ `sidebar.right.pane.tab` 主体 + `sidebar.right.pane.tab.title` 标题芯片；不再注册左侧 `sidebar.panellist` 入口，也不再占用中央 `main` 面板。
+- 打开/隐藏走宿主自己的机制：头部胶囊 / `Ctrl+Alt+C` → `ctx.sidebarRight.openTab("code-studio")`（自动展开列），面板里的 **✕ 隐藏侧边栏** → `ctx.layout.closeRightbar()` —— 与对话头部那个右侧栏按钮同一条路径，另有宿主自带的收起按钮可用。
+- 变更引擎与面板解耦：面板本体渲染在页签里，`shell.overlay` 只挂一个**无界面 feed 入口**（引用计数共享同一个 SSE 流）—— 页签关闭时头部胶囊照样计数，两者也不再有挂载顺序耦合。
+
+## v0.2.10 — 工作区按会话解析 · 面板隐藏按钮
+
+- **修 bug（0.2 桌面端）**：「文件」页签的工作区曾经取宿主进程的 cwd —— 在桌面端就是应用自己的 profile 目录（`…\profiles\desktop`，里面只有 compatibility.json / cordis.yml）。0.2 的项目目录是**按会话**（工作区）绑定的：现在 `/root`、`/tree`、`/workspaces` 都从**当前会话的 `header.cwd`** 解析（优先级 `config.root` → `DSH_WORKSPACE` → 当前会话目录 → 进程 cwd），客户端切会话时自动重解析，工作区下拉也会列出各活动会话的项目目录。
+- **修 bug**：宿主面板形态下补回 **✕ 隐藏按钮**（点击 = `layout.selectPanel(null)` 回到对话；`Ctrl+Alt+C` 同效）。
+
+## v0.2.9 — 0.2 桌面端适配（官方插槽 + 兼容性预检）
+
+- 侧边栏入口从 DOM 注入改为官方 `sidebar.panellist` 插槽；新增 `main` 键位面板，点侧边栏行切到 Code Studio 中央面板（0.1.x 自动回退浮层模式）。
+- 面板实例常驻 `shell.overlay`，UI 用 portal 进宿主容器 —— 未选中时变更流仍在跑。
+- 包声明去掉 0.2 已不存在的 `@deepseek-ai/dsh-client-runtime` / `dsh-client-connection` peer 与 `dsh.client.inject`，0.2 无需风险豁免即可加载。
+- 0.2 下不再自动抢占中央面板；未查看变更用头部胶囊圆点 + 侧边栏行圆点提示。
 
 ## v0.2.8 — 头部变更胶囊 · DSH 设计系统
 
