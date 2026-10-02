@@ -111,6 +111,15 @@ for (const forbidden of ["sidebar.right.pane.tab", "sidebar.panellist", "sidebar
   if (code.includes(forbidden)) throw new Error("the panel must stay a shell-overlay sidebar; found " + forbidden);
 }
 if (/\.cs-badge-f\{position:fixed/.test(code)) throw new Error("floating fixed bottom badge is still present (it fought the composer toolbar)");
-if (!code.includes('".cs-badge-n{')) throw new Error("sidebar unread badge styles were lost");
+if (!code.includes(".cs-badge-n{")) throw new Error("sidebar unread badge styles were lost");
+// the v0.3 redesign keeps one stylesheet block (template literal) and its tokens
+if (!code.includes("const CSS = `")) throw new Error("stylesheet block is missing");
+for (const needle of ["--cs-accent", "--cs-row", "prefers-reduced-motion", "container-type:inline-size", ".cs-empty-ico{", ".cs-kbd{"]) {
+  if (!code.includes(needle)) throw new Error("stylesheet lost a design-system hook: " + needle);
+}
+// no em-dash or pictographic emoji in shipped UI strings (taste skill pre-flight);
+// typographic dingbats used as icons (check, close, arrows) are intentional
+const uiStrings = code.match(/"[^"\n]*(?:[\u2014]|[\u{1F000}-\u{1FAFF}])[^"\n]*"/gu) ?? [];
+if (uiStrings.length > 0) throw new Error("visible copy still carries em-dash/emoji: " + uiStrings.slice(0, 3).join(" | "));
 
 console.log("smoke OK: apply=" + typeof mod.apply + " inject=" + JSON.stringify(mod.inject) + " slots=" + injected.join(",") + " overlayOnly=" + injected2.join(",") + " headerPill=" + header.spec.id);

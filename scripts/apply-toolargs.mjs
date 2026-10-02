@@ -3,7 +3,9 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-const mod = await import("file:///F:/CycleMaster/dsh-code-studio/lib/index.js");
+// relative import: this script must run from any checkout location (it used to
+// hardcode an absolute path from an older working copy)
+const mod = await import(new URL("../lib/index.js", import.meta.url));
 const ROOT = await mkdtemp(join(tmpdir(), "cs-app-"));
 let sessionListener = null;
 const routes = [];
