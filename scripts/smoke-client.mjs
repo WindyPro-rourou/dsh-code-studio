@@ -122,4 +122,18 @@ for (const needle of ["--cs-accent", "--cs-row", "prefers-reduced-motion", "cont
 const uiStrings = code.match(/"[^"\n]*(?:[\u2014]|[\u{1F000}-\u{1FAFF}])[^"\n]*"/gu) ?? [];
 if (uiStrings.length > 0) throw new Error("visible copy still carries em-dash/emoji: " + uiStrings.slice(0, 3).join(" | "));
 
+// v0.2.15 minimalist pass, structural guarantees (one chrome bar, flat surfaces):
+// - the head bar carries title + tabs + close, so the separate tabs bar is gone
+if (!/el\("div", \{ className: "cs-head" \},[\s\S]{0,400}el\("div", \{ className: "cs-tabs"/.test(code)) throw new Error("the segmented tabs must live inside the single chrome bar");
+if (!code.includes('el("span", { className: "cs-title" }, "Code Studio")')) throw new Error("the head title lost its plain single-line form");
+if (code.includes('className: "cs-summary"') || code.includes(".cs-summary{")) throw new Error("the summary bar was removed on purpose (deltas live in the filter row meta)");
+if (code.includes('className: "cs-dot"')) throw new Error("the accent dot in the head was removed on purpose");
+if (code.includes('className: "cs-count"') || code.includes(".cs-count{")) throw new Error("the head count chip was removed on purpose");
+if (code.includes("cs-sesstag") || code.includes("cs-headhint")) throw new Error("the status bar was slimmed on purpose (dot + conn + shortcuts + ?)");
+if (/\.cs-root\{[^}]*box-shadow/.test(code)) throw new Error("the panel is flat: no box-shadow on .cs-root");
+if (!/\.cs-btn\{[^}]*border:none/.test(code)) throw new Error("buttons must be ghost-flat (border:none) with one solid primary");
+if (!code.includes("--cs-r1:4px") || !code.includes("--cs-r2:8px")) throw new Error("radius lock 4/8 is part of the design system");
+if (!code.includes("cubic-bezier(0.16,1,0.3,1)")) throw new Error("motion curve was lost");
+
+
 console.log("smoke OK: apply=" + typeof mod.apply + " inject=" + JSON.stringify(mod.inject) + " slots=" + injected.join(",") + " overlayOnly=" + injected2.join(",") + " headerPill=" + header.spec.id);
