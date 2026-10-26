@@ -150,34 +150,55 @@ ok(w.ok && w.workspaces.length === 1 && w.workspaces[0].path === ROOT && w.works
 console.log("== portable drive rewrite (随盘) ==");
 const PORT_HOME = await mkdtemp(join(tmpdir(), "cs-home-"));
 process.env.DSH_HOME = PORT_HOME;
-const homeDrive = parsePath(PORT_HOME).root.slice(0, 2).toUpperCase();
-ok(dshDrive() === homeDrive, "dshDrive() reads the drive of DSH_HOME");
 const realProj = await mkdtemp(join(PORT_HOME, "proj-"));
-const ghostDrive = homeDrive === "Z:" ? "Y:" : "Z:";
-const ghostPath = ghostDrive + realProj.slice(homeDrive.length);
+// The rewrite is anchored on a DRIVE LETTER, which only exists on Windows: POSIX
+// absolute paths carry no drive, so there is nothing to re-anchor and the only honest
+// behaviour is to hand back exactly what was recorded. Both shapes are asserted — a
+// Windows-only test would silently pass nowhere else and hide this.
+const isWin = process.platform === "win32";
+const homeDrive = isWin ? parsePath(PORT_HOME).root.slice(0, 2).toUpperCase() : "";
+const ghostDrive = isWin ? (homeDrive === "Z:" ? "Y:" : "Z:") : "";
+// Recorded path that is "the same folder, on a drive that is gone now".
+const ghostPath = isWin ? ghostDrive + realProj.slice(homeDrive.length) : realProj;
+// A path that exists nowhere: must be reported unchanged, never invented.
+const deadPath = isWin ? ghostDrive + "\\definitely\\not\\here" : "/definitely/not/here";
+const deadIdx = isWin ? ghostDrive + "\\gone" : join(tmpdir(), "cs-absent-" + Date.now());
+const newestGone = isWin ? ghostDrive + "\\also\\gone" : join(tmpdir(), "cs-absent-newest-" + Date.now());
+if (isWin) {
+  ok(dshDrive() === homeDrive, "dshDrive() reads the drive of DSH_HOME");
+} else {
+  ok(dshDrive() === null, "dshDrive() is null where the platform has no drive letters");
+}
 ok(mapPortablePath(realProj) === realProj, "an existing workspace path is kept as-is");
-ok(mapPortablePath(ghostPath) === realProj, "a path on a vanished drive re-anchors onto DSH's drive when the folder exists there");
-ok(mapPortablePath(ghostDrive + "\\definitely\\not\\here") === ghostDrive + "\\definitely\\not\\here", "a path that exists nowhere is reported unchanged, never invented");
+if (isWin) {
+  ok(mapPortablePath(ghostPath) === realProj, "a path on a vanished drive re-anchors onto DSH's drive when the folder exists there");
+} else {
+  ok(mapPortablePath(ghostPath) === realProj, "an existing recorded path is kept as-is");
+  ok(mapPortablePath("Z:/nope") === "Z:/nope", "a drive-letter path on a driveless platform is left alone, never invented");
+}
+ok(mapPortablePath(deadPath) === deadPath, "a path that exists nowhere is reported unchanged, never invented");
 // workspace index (storages/workspace.json) is the portable registry: both a
 // drive-corrected row and a dead row must come through honestly
 await fs2.mkdir(join(PORT_HOME, "storages"), { recursive: true });
 await writeFile(join(PORT_HOME, "storages", "workspace.json"), JSON.stringify({
   tables: { workspaces: {
     w1: { path: ghostPath, title: "moved project" },
-    w2: { path: ghostDrive + "\\gone", title: "dead project" }
+    w2: { path: deadIdx, title: "dead project" }
   } }
 }), "utf8");
 const indexed = indexedWorkspaces();
 const row1 = indexed.find((x) => x.id === "w1");
 const row2 = indexed.find((x) => x.id === "w2");
 ok(row1 !== void 0 && row1.path === realProj && row1.recorded === ghostPath && row1.exists === true, "indexed workspace is re-anchored and marked existing");
-ok(row2 !== void 0 && row2.exists === false && row2.path === ghostDrive + "\\gone", "a missing indexed workspace keeps its recorded path and is marked missing");
-// /root must report the rewrite so the UI can explain it
+ok(row2 !== void 0 && row2.exists === false && row2.path === deadIdx, "a missing indexed workspace keeps its recorded path and is marked missing");
+// /root must report the rewrite so the UI can explain it — and must NOT claim one when
+// recorded and resolved are the same path (POSIX, or nothing to fix).
 const portRoutes = makeRoutes(ledger, (id) => mapPortablePath(ghostPath), ROOT, () => indexed, (id) => ({ path: mapPortablePath(ghostPath), recorded: ghostPath, sessionId: id }));
 res = mockRes();
 await route(portRoutes, "/root").handler(mockReq("GET", "/root?session=sP"), res);
 const pr = JSON.parse(res.body);
-ok(pr.ok && pr.root === realProj && pr.recorded === ghostPath && pr.remapped === true && pr.exists === true, "/root reports the drive rewrite (root/recorded/remapped/exists)");
+ok(pr.ok && pr.root === realProj && pr.recorded === ghostPath && pr.remapped === isWin && pr.exists === true, "/root reports the drive rewrite (root/recorded/remapped/exists)");
+ok(pr.platform === process.platform, "an unrepairable recorded path is never invented, so /root reports platform + no remap");
 
 console.log("== guard ==");
 res = mockRes();
@@ -270,7 +291,7 @@ const ctx3 = {
 process.env.DSH_HOME = PORT_HOME; // an indexed workspace that exists is the fallback
 await writeFile(join(PORT_HOME, "storages", "workspace.json"), JSON.stringify({
   tables: { workspaces: {
-    newestButGone: { path: ghostDrive + "\\also\\gone", title: "newest but missing", updatedAt: "2030-01-01T00:00:00.000Z" },
+    newestButGone: { path: newestGone, title: "newest but missing", updatedAt: "2030-01-01T00:00:00.000Z" },
     live: { path: LIVE, title: "live project", updatedAt: "2026-01-01T00:00:00.000Z" }
   } }
 }), "utf8");

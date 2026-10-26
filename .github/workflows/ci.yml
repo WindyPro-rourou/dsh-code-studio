@@ -7,13 +7,18 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Both OS families on purpose: the portable (随盘) workspace policy is anchored on
+    # Windows drive letters, so the suite must prove it degrades honestly on POSIX
+    # instead of quietly passing everywhere. fail-fast off so each cell reports.
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         node: [20, 22, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
       - name: Host selftest
