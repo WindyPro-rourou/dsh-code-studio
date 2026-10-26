@@ -136,4 +136,41 @@ if (!code.includes("--cs-r1:4px") || !code.includes("--cs-r2:8px")) throw new Er
 if (!code.includes("cubic-bezier(0.16,1,0.3,1)")) throw new Error("motion curve was lost");
 
 
+// 5) v0.2.16 performance + interaction guarantees. These are the fixes for renders that
+// used to re-diff the whole change set: losing any of them silently brings the jank back.
+for (const [label, needle] of [
+  ["diff head/tail trim", "const aMid = a.slice(s, n0 - e);"],
+  ["per-change stats cache", "const STATS_CACHE = new Map();"],
+  ["stats keyed by the event seq", "hit.seq === c.seq"],
+  ["sort-by-delta decorated once", "const weight = new Map();"],
+  ["one stats lookup per shown file", "const shownStats = React.useMemo("],
+  ["resize coalesced to one frame", "const nextFrame = (fn) =>"],
+  ["large-file plain mode", "const HL_MAX_LINES = 3000;"],
+  ["list scroll containment", "overscroll-behavior:contain"],
+  ["open-row rail", ".cs-chg-row.cs-open{background:var(--cs-mask);box-shadow:inset 2px 0 0 0 var(--cs-accent)}"],
+  ["row stats width lock", "min-width:62px;font-variant-numeric:tabular-nums"]
+]) if (!code.includes(needle)) throw new Error("lost a v0.2.16 performance/UI hook: " + label + " (expected " + needle + ")");
+// and the removed hot paths must not come back
+if (/\.cs-dline:hover\{background:var\(--cs-hover\)\}/.test(code)) throw new Error("diff-line hover erases the semantic tint again");
+if (/const d = \(c\) => \(c\.deleted \? 0 : fileStats\(c\.before, c\.after\)\.adds \+ fileStats\(c\.before, c\.after\)\.dels\)/.test(code)) throw new Error("the sort comparator diffs twice per comparison again");
+if (/shownChanges\.reduce\(\(acc, c\) => \{ const s = c\.deleted/.test(code)) throw new Error("rows diff themselves again instead of using the cached stats");
+
+// 6) hook order: Highlighted must run its hook before any early return, otherwise flipping
+// the large-file `plain` flag changes the hook count mid-mount and React throws.
+{
+  let hl = null;
+  globalThis.window = { __ModuleLoader__: { load(spec) { hl = spec; } } };
+  let hookCalls = 0;
+  const react2 = { createElement: react.createElement, useState: react.useState, useEffect: () => {}, useRef: react.useRef,
+    useMemo: (f) => { hookCalls += 1; return f(); }, useCallback: (f) => f, useLayoutEffect: () => {} };
+  (0, eval)(code.replace("exports.apply = apply;", "exports.__hl = { Highlighted };\n\t\texports.apply = apply;"));
+  const { Highlighted } = hl.factory((name) => (name === "react" ? react2 : void 0)).__hl;
+  hookCalls = 0; Highlighted({ text: "const a = 1;", path: "a.js", plain: false });
+  const withTokens = hookCalls;
+  hookCalls = 0; const out = Highlighted({ text: "const a = 1;", path: "a.js", plain: true });
+  if (withTokens !== hookCalls) throw new Error("Highlighted's hook count depends on `plain` (" + withTokens + " vs " + hookCalls + "): React would throw on a large file that shrinks below the cap");
+  if (withTokens !== 1) throw new Error("Highlighted should run exactly one hook, saw " + withTokens);
+  if (out.c.length !== 1 || out.c[0] !== "const a = 1;") throw new Error("plain mode must emit the raw text without token spans");
+}
+
 console.log("smoke OK: apply=" + typeof mod.apply + " inject=" + JSON.stringify(mod.inject) + " slots=" + injected.join(",") + " overlayOnly=" + injected2.join(",") + " headerPill=" + header.spec.id);

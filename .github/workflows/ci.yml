@@ -25,3 +25,10 @@ jobs:
         run: node scripts/selftest.mjs
       - name: Client smoke
         run: node scripts/smoke-client.mjs
+      # diff correctness: trimming the common head/tail must not move the reported
+      # adds/dels counts (it may only pick a different equally-minimal alignment)
+      - name: Diff engine property test
+        run: node scripts/difftest.mjs 1500
+      # deterministic render-cost guard: a re-render must not re-diff the change set
+      - name: Panel render cost
+        run: node scripts/perf-panel.mjs 60 120 local
