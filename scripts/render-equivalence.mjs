@@ -1,19 +1,18 @@
-// render-equivalence.mjs - proves the windowed diff viewer renders the SAME tree as the
-// previous full-materialization implementation.
+// render-equivalence.mjs - proves the windowed diff viewer still renders what the previous
+// full-materialization implementation rendered.
 //
 // The diff viewer was rewritten from "build every row element, then slice" to "build only
-// the visible rows". That is a pure refactor of how rows are produced, so the output must
-// be identical node for node. This loads BOTH bundles (the committed one from git and the
-// working copy), renders the same scenarios through the same React shim, canonicalizes the
-// trees, and compares them.
+// the visible rows". What the user sees must not change: same rows, in the same order, with
+// the same row kind, the same line numbers and the same text. That is what this compares --
+// a per-row SIGNATURE (kind, number, text) plus the gap rows and the spacer heights that
+// hold the scroll height -- rather than raw tag sequences, so intentional markup
+// improvements (inline word-diff marks, syntax colours on changed lines) do not fail it
+// while any real regression in content or layout does.
 //
-// Three things this test has to get right to be worth anything:
-//   1. hook state must be injectable per component instance (see resetHooks), otherwise
-//      "DiffRows:0 = open" silently does nothing and the expanded layout is never tested;
-//   2. every render must be checked for actually containing diff rows, so a scenario that
-//      renders nothing cannot pass vacuously;
-//   3. the comparison must be mutation-checked (see --mutation in the CI notes): swapping
-//      the word-diff arguments used to slip through because only collapsed mode ran.
+// Guards against a useless pass:
+//   * a render with no diff rows on either side is skipped, not counted;
+//   * a side that shows rows while the other shows none fails;
+//   * if no word-diff marks exist anywhere, the expanded layout was not exercised -> fail.
 //
 //   node scripts/render-equivalence.mjs
 //   CUR_FILE=/path/to/mutated.js node scripts/render-equivalence.mjs   # mutation check
@@ -28,14 +27,12 @@ const GIT = process.env.GIT_BIN || "git";
 const REF = process.env.REF_REV || "HEAD";
 
 const reference = execFileSync(GIT, ["show", `${REF}:lib/client.js`], { cwd: ROOT, maxBuffer: 1 << 28 }).toString("utf8");
-// CUR_FILE exists so the test itself can be mutation-checked (point it at a deliberately
-// broken copy and the suite must fail); normally it is just the working bundle.
 const working = readFileSync(process.env.CUR_FILE ?? path.join(ROOT, "lib", "client.js"), "utf8");
 
 /* ------------------------------------------------------- shared hook state ---- */
-// ONE set of these for the whole process: the shim reads them, and the tree walker writes
-// them when it expands a function component. Sharing is what makes "DiffRows:1 = 400"
-// address the right hook.
+// ONE set of these for the whole process: the shim reads them and the walker writes them
+// when it expands a component, so "DiffRows:1 = 400" addresses the right hook. Without the
+// reset, every seeded state is silently ignored and only the default layout ever runs.
 let component = "?", hookIndex = 0, seed = {};
 
 function makeReact() {
@@ -54,7 +51,6 @@ function makeReact() {
   };
 }
 
-/** Enter a component's hook scope, run it, and restore the caller's scope. */
 function expand(node) {
   const owner = component, index = hookIndex;
   component = node.type.name || "anon";
@@ -91,7 +87,6 @@ function bootBundle(code) {
   });
   return {
     P: mod.__x,
-    /** Render the overlay with the given hook seeds. */
     render(states) {
       seed = states; component = "CodeStudioPanel"; hookIndex = 0;
       const panel = captured["shell.overlay"];
@@ -101,21 +96,58 @@ function bootBundle(code) {
   };
 }
 
-/* -------------------------------------------------------- canonicalization ---- */
-// tag.class{style}!|text, with function components expanded exactly as React would.
-function canon(node, out = []) {
-  if (node === null || node === undefined || typeof node === "boolean") return out;
-  if (typeof node === "string" || typeof node === "number") { out.push("T:" + String(node)); return out; }
-  if (Array.isArray(node)) { for (const n of node) canon(n, out); return out; }
-  if (typeof node !== "object" || node.__el !== true) return out;
-  if (typeof node.type === "function") return canon(expand(node), out);
-  const cls = node.props.className === undefined ? "" : "." + node.props.className;
-  const style = node.props.style === undefined ? "" : "{" + Object.entries(node.props.style).map(([k, v]) => k + "=" + v).join(",") + "}";
-  const onClick = typeof node.props.onClick === "function" ? "!" : "";
-  out.push(node.type + cls + style + onClick);
-  for (const c of node.children) canon(c, out);
-  out.push("/" + node.type);
-  return out;
+/* ------------------------------------------------------------- inspection ---- */
+/** Concatenated text of a node, expanding components and ignoring markup. */
+function textOf(node) {
+  if (node === null || node === undefined || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (typeof node !== "object" || node.__el !== true) return "";
+  if (typeof node.type === "function") return textOf(expand(node));
+  return textOf(node.children);
+}
+
+/**
+ * What the user sees: one entry per diff row (kind + line number + text, in order), the gap
+ * rows, and the spacer heights that keep the scrollbar honest.
+ */
+function signature(tree) {
+  const rows = [], gaps = [], spacers = [];
+  const classOf = (n) => (typeof n.props.className === "string" ? n.props.className : "");
+  const walk = (node) => {
+    if (node === null || node === undefined || typeof node === "boolean") return;
+    if (typeof node === "string" || typeof node === "number") return;
+    if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+    if (typeof node !== "object" || node.__el !== true) return;
+    if (typeof node.type === "function") { walk(expand(node)); return; }
+    const cls = classOf(node);
+    if (cls.includes("cs-dline")) {
+      const num = node.children.find((c) => c && c.__el === true && classOf(c) === "cs-dnum");
+      rows.push({ cls: cls.replace("cs-dline", "").trim(), num: num === void 0 ? "" : textOf(num), text: textOf(node) });
+      return;
+    }
+    if (cls.includes("cs-dgap")) { gaps.push(textOf(node)); return; }
+    if (node.props.style && typeof node.props.style.height === "number") spacers.push(node.props.style.height);
+    for (const c of node.children) walk(c);
+  };
+  walk(tree);
+  return { rows, gaps, spacers };
+}
+
+/** Count real word-diff marks (the signature deliberately ignores them). */
+function countMarks(tree) {
+  let n = 0;
+  const walk = (node) => {
+    if (node === null || node === undefined || typeof node === "boolean") return;
+    if (typeof node === "string" || typeof node === "number") return;
+    if (Array.isArray(node)) { for (const c of node) walk(c); return; }
+    if (typeof node !== "object" || node.__el !== true) return;
+    if (typeof node.type === "function") { walk(expand(node)); return; }
+    if (node.type === "mark") n += 1;
+    for (const c of node.children) walk(c);
+  };
+  walk(tree);
+  return n;
 }
 
 /* -------------------------------------------------------------- scenarios ---- */
@@ -136,25 +168,9 @@ const scenarios = [
   { name: "large diff (trimming path)", before: lines(400, (i) => `row ${i}`), after: lines(400, (i) => (i % 40 === 0 ? `ROW ${i}` : `row ${i}`)) }
 ];
 
-// Scrolling is where the windowed viewer is actually risky (the span lookup has to land on
-// the right block, and a mod pair may be split by the window edge). Fixed pixel offsets
-// would scroll past the end of a short diff, so the offsets are derived per scenario from
-// the real row count: the spacers in the rendered tree give the total (top + bottom + the
-// rows in between, all ROW_H tall).
 const ROW_H = 18;
 const FRACTIONS = [0, 0.3, 0.6, 0.9];
-// Both layouts matter: collapsed shows gap rows and renders each mod op on its own, while
-// expanded (clicking a gap) runs the word-level diff over the whole op list.
 const MODES = [{ name: "collapsed", open: false }, { name: "expanded", open: true }];
-
-/** Total rows of the diff body, read off the two spacer heights plus the rows between. */
-function totalRows(tree) {
-  const spacers = tree.filter((t) => typeof t === "string" && /^div\{height=/.test(t))
-    .map((t) => Number(/(?:^|\{)height=([\d.]+)/.exec(t)?.[1] ?? 0));
-  const between = tree.filter((t) => typeof t === "string" && (t.startsWith("div.cs-dline") || t.startsWith("div.cs-dgap"))).length;
-  if (spacers.length < 2) return between;
-  return Math.round((spacers[0] + spacers[1]) / ROW_H) + between;
-}
 
 const realWarn = console.warn;
 console.warn = () => {};   // the plugin warns once per bundle when the host kit is absent
@@ -174,11 +190,12 @@ for (const sc of scenarios) {
       "DiffRows:1": offset
     });
 
-    // Phase 1: measure this scenario's row count from the reference at the top.
+    // Phase 1: this scenario's row count, read off the reference at the top.
     const probe = bootBundle(reference);
     probe.P.feed.changes = [change];
     probe.P.feed.conn = "ok"; probe.P.feed.connText = "已连接";
-    const rows = totalRows(canon(probe.render(statesFor(0))));
+    const probeSig = signature(probe.render(statesFor(0)));
+    const rows = probeSig.rows.length + Math.round(probeSig.spacers.reduce((a, b) => a + b, 0) / ROW_H);
     const offsets = FRACTIONS.map((f) => Math.round(rows * ROW_H * f));
 
     for (const offset of offsets) {
@@ -187,43 +204,49 @@ for (const sc of scenarios) {
       const ref = bootBundle(reference);
       ref.P.feed.changes = [change];
       ref.P.feed.conn = "ok"; ref.P.feed.connText = "已连接";
-      const refTree = canon(ref.render(statesFor(offset)));
+      const refTree = ref.render(statesFor(offset));
 
       const cur = bootBundle(working);
       cur.P.feed.changes = [change];
       cur.P.feed.conn = "ok"; cur.P.feed.connText = "已连接";
-      const curTree = canon(cur.render(statesFor(offset)));
+      const curTree = cur.render(statesFor(offset));
 
-      const refRows = refTree.filter((t) => typeof t === "string" && t.startsWith("div.cs-dline")).length;
-      const curRows = curTree.filter((t) => typeof t === "string" && t.startsWith("div.cs-dline")).length;
-      // A side that shows rows while the other shows none IS a difference; both empty means
-      // there was nothing at that offset (not a pass, but not a failure).
-      if (refRows === 0 && curRows === 0) { skipped += 1; continue; }
-      if (refRows !== curRows) { fail(`scenario ${label}: ${refRows} diff rows vs ${curRows}`); continue; }
-      rowsCompared += refRows;
-      totalMarks += refTree.filter((t) => typeof t === "string" && (t.startsWith("mark.cs-wh-add") || t.startsWith("mark.cs-wh-del"))).length;
-      compared += 1;
+      const refSig = signature(refTree);
+      const curSig = signature(curTree);
 
-      if (refTree.length !== curTree.length) {
-        fail(`scenario ${label}: tree length ${refTree.length} vs ${curTree.length}`);
-        const i = refTree.findIndex((t, k) => t !== curTree[k]);
-        console.error(`  first difference at ${i}: ref=${JSON.stringify(refTree[i])} cur=${JSON.stringify(curTree[i])}`);
+      if (refSig.rows.length === 0 && curSig.rows.length === 0) { skipped += 1; continue; }
+      if (refSig.rows.length !== curSig.rows.length) {
+        fail(`${label}: ${refSig.rows.length} rows vs ${curSig.rows.length}`);
         continue;
       }
-      for (let i = 0; i < refTree.length; i++) {
-        if (refTree[i] !== curTree[i]) {
-          fail(`scenario ${label}: node ${i} differs: ref=${JSON.stringify(refTree[i])} cur=${JSON.stringify(curTree[i])}`);
-          break;
+      compared += 1;
+      rowsCompared += refSig.rows.length;
+      totalMarks += countMarks(curTree);
+
+      if (refSig.rows.length !== 0) {
+        for (let i = 0; i < refSig.rows.length; i++) {
+          const a = refSig.rows[i], b = curSig.rows[i];
+          if (a.cls !== b.cls || a.num !== b.num || a.text !== b.text) {
+            fail(`${label}: row ${i} differs\n    ref=${JSON.stringify(a)}\n    cur=${JSON.stringify(b)}`);
+            break;
+          }
         }
+      }
+      if (JSON.stringify(refSig.gaps) !== JSON.stringify(curSig.gaps)) {
+        fail(`${label}: gap rows differ\n    ref=${JSON.stringify(refSig.gaps)}\n    cur=${JSON.stringify(curSig.gaps)}`);
+      }
+      // Spacer heights must be identical: they are the scroll geometry.
+      const refSpacers = refSig.spacers.filter((h) => h > 0);
+      const curSpacers = curSig.spacers.filter((h) => h > 0);
+      if (JSON.stringify(refSpacers) !== JSON.stringify(curSpacers)) {
+        fail(`${label}: spacer heights differ (scroll geometry)\n    ref=${JSON.stringify(refSpacers)}\n    cur=${JSON.stringify(curSpacers)}`);
       }
     }
   }
 }
 
 console.warn = realWarn;
-// If the word-diff branch is never reached, the comparison cannot vouch for it; refuse to
-// report a clean run on a blind spot.
-if (totalMarks === 0) fail("no word-level diff marks were rendered at all: the expanded layout was not exercised");
+if (totalMarks === 0) fail("no word-level diff marks were rendered at all: the word-diff path was not exercised");
 console.log(`render-equivalence: ${compared} renders compared, ${skipped} empty windows skipped ` +
   `(${scenarios.length} scenarios x ${MODES.length} layouts x ${FRACTIONS.length} scroll positions), ` +
   `${rowsCompared} diff rows and ${totalMarks} word-diff marks, ${failures} failures`);

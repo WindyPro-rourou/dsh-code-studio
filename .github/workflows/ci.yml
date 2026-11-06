@@ -42,3 +42,9 @@ jobs:
       # created-file baseline, tab-stealing on agent edits, redundant connection notifications
       - name: Change feed behaviour
         run: node scripts/feed-behavior.mjs
+      # where the inline word-diff marks land (the render test cannot see placement)
+      - name: Word diff placement
+        run: node scripts/worddiff-test.mjs
+      # tokenizer, localStorage snapshot policy, Escape precedence, shortcut scoping
+      - name: Client units
+        run: node scripts/client-units.mjs

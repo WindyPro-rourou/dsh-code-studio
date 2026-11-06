@@ -1,7 +1,10 @@
 // smoke-client.mjs - loads lib/client.js under a mocked browser env and
 // asserts the UI wiring (header digest pill) plus the host-slot registrations.
 import { readFile } from "node:fs/promises";
-const code = await readFile(new URL("../lib/client.js", import.meta.url), "utf8");
+import { fileURLToPath } from "node:url";
+// CUR_FILE lets this suite be mutation-checked (point it at a deliberately broken copy and
+// the structural assertions must fail). Normally it is the working bundle.
+const code = await readFile(process.env.CUR_FILE ?? fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
 let loaded = null;
 globalThis.window = {
   __ModuleLoader__: { load(spec) { loaded = spec; } }
@@ -192,5 +195,31 @@ for (const [label, needle] of [
 // undo the fix while every other test still passes
 if (code.includes("function renderDiffRows(")) throw new Error("the full diff materializer is back (rows must be windowed)");
 if (/for \(let i = 1; i <= lineCount; i\+\+\) gutter\.push/.test(code)) throw new Error("the editor renders the whole gutter again instead of a window");
+
+// 8) v0.2.18: accessibility, word-diff quality and the keyboard/state fixes.
+for (const [label, needle] of [
+  ["tabs are real tabs", 'role: "tab", "aria-selected"'],
+  ["change row is a button", 'className: "cs-chg-main"'],
+  ["tree nodes are buttons", 'className: "cs-node cs-file"'],
+  ["help is a dialog", '"aria-modal": "true"'],
+  ["status is announced", '"aria-live": "polite"'],
+  ["history truncation notice", "ev.truncated === true"],
+  ["tree refresh control", "setTreeKey((k) => k + 1)"],
+  ["hash-comment languages", "const HASH_COMMENT_EXTS = new Set("],
+  ["word diff uses an LCS", "const ops = lcsOps(ta, tb);"],
+  ["word diff keeps colours", "function markedLine(text, segs, markCls, path)"],
+  ["undo bursts", "const UNDO_BURST_MS = 400;"],
+  ["snapshot size guard", "const PERSIST_EDITOR_MAX = 64 * 1024;"],
+  ["escape precedence", "if (showHelp) { e.preventDefault(); setShowHelp(false); return; }"],
+  ["save re-entrancy guard", "if (savingRef.current) return;"],
+  ["send cap", "const SEND_CONTENT_MAX = 200 * 1024;"]
+]) if (!code.includes(needle)) throw new Error("lost a v0.2.18 guarantee: " + label + " (expected " + needle + ")");
+// The old click-only markup must not come back: it made these controls mouse-only.
+if (!/el\("button", \{[^}]{0,240}role: "tab"/.test(code)) throw new Error("the tabs must be real buttons with role=tab (not clickable divs)");
+if (!/el\("button", \{[^}]{0,240}className: "cs-chg-main"/.test(code)) throw new Error("the change row's main area must be a button");
+if (!/el\("button", \{[^}]{0,240}className: "cs-node cs-file"/.test(code)) throw new Error("file tree entries must be buttons");
+if (/el\("div", \{ className: "cs-tab"/.test(code)) throw new Error("the tabs are divs again (not keyboard operable)");
+if (!/el\("span", \{ className: "cs-dtxt" \}, markedLine\(/.test(code)) throw new Error("word-diff rows must render through markedLine (syntax colour plus inline marks)");
+if (/const seg = \(arr, cls\) => el\("span", null, arr\.map/.test(code)) throw new Error("word diff dropped syntax colour again (plain seg)");
 
 console.log("smoke OK: apply=" + typeof mod.apply + " inject=" + JSON.stringify(mod.inject) + " slots=" + injected.join(",") + " overlayOnly=" + injected2.join(",") + " headerPill=" + header.spec.id);

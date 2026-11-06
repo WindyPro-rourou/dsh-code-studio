@@ -4,8 +4,13 @@ import { mkdtemp, writeFile, readFile, rm, stat, unlink } from "node:fs/promises
 import * as fs2 from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname, parse as parsePath } from "node:path";
-import { fileURLToPath } from "node:url";
-import { FileLedger, makeRoutes, apply, mapPortablePath, indexedWorkspaces, dshDrive } from "../lib/index.js";
+import { fileURLToPath, pathToFileURL } from "node:url";
+// INDEX_FILE lets the suite be mutation-checked (point it at a deliberately broken copy of
+// the host half and the relevant assertions must fail). Normally it is the working bundle.
+const HOST_ENTRY = process.env.INDEX_FILE !== void 0
+  ? pathToFileURL(process.env.INDEX_FILE).href
+  : new URL("../lib/index.js", import.meta.url).href;
+const { FileLedger, makeRoutes, apply, mapPortablePath, indexedWorkspaces, dshDrive } = await import(HOST_ENTRY);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = await mkdtemp(join(tmpdir(), "cs-selftest-"));
@@ -15,6 +20,7 @@ const ok = (cond, name) => { if (cond) { passed++; console.log("  ✓ " + name);
 
 function mockReq(method, url, body) {
   const req = { method, url, headers: {}, socket: { remoteAddress: "127.0.0.1" },
+    destroy() {},
     on(ev, fn) {
       if (ev === "data" && body !== undefined) queueMicrotask(() => fn(Buffer.from(JSON.stringify(body))));
       if (ev === "end") queueMicrotask(() => fn());
@@ -53,13 +59,16 @@ await ledger.handleChange(f1);
 hist = ledger.history.get(f1) ?? [];
 ok(hist.length === 2 && hist[1].before === "line1\nline2\n" && hist[1].after === "line1\nCHANGED\n", "second change carries before/after");
 
-// history trim
+// history trim: the stored copy is cut to the limit and FLAGGED, never spliced with a
+// marker (the marker text used to become part of the stored version and showed up in the
+// history diff as a line that never existed)
 const big = "x".repeat(150 * 1024);
 await writeFile(f1, big, "utf8");
 await ledger.handleChange(f1);
 hist = ledger.history.get(f1) ?? [];
 const last = hist[hist.length - 1];
-ok(typeof last.after === "string" && last.after.length <= 100 * 1024 + 40 && last.after.includes("[history 截断]"), "history content trimmed");
+ok(typeof last.after === "string" && last.after.length === 100 * 1024 && last.truncated === true, "history content trimmed to the limit and flagged");
+ok(!last.after.includes("[history 截断]") && !last.after.includes("…"), "history content carries no spliced marker text");
 ok(ledger.ring[ledger.ring.length - 1].after.length === big.length, "SSE ring keeps FULL content");
 
 console.log("== revert ==");
@@ -305,6 +314,88 @@ res = mockRes();
 await routes3.find((r) => r.path === PREFIX + "/tree").handler(mockReq("GET", "/tree"), res);
 ok(JSON.parse(res.body).entries.some((e) => e.name === "keep.js"), "apply(): the fallback tree really lists files");
 await rm(LIVE, { recursive: true, force: true });
+
+// ---------------------------------------------------------------------------
+// Host routes: robustness of the write/read surface.
+console.log("== host routes: robustness ==");
+{
+  const dir = await mkdtemp(join(tmpdir(), "cs-robust-"));
+  const ledger2 = new FileLedger(dir);
+  const routes2 = makeRoutes(ledger2, dir, dir, () => [], () => void 0);
+  const r2 = (p) => routes2.find((x) => x.path === PREFIX + p);
+
+  // Saving into a folder that does not exist yet is a normal save, not an error.
+  const nested = join(dir, "a", "b", "new.txt");
+  res = mockRes();
+  await r2("/write").handler(mockReq("POST", "/write", { path: nested, content: "hi\n" }), res);
+  ok(res.status === 200, "write creates missing parent directories");
+  ok(await readFile(nested, "utf8") === "hi\n", "the new file really exists with the written content");
+
+  // The 512KB browser guard must be a clear 413, not a generic failure.
+  const huge = join(dir, "huge.txt");
+  await writeFile(huge, "x".repeat(600 * 1024), "utf8");
+  res = mockRes();
+  await r2("/read").handler(mockReq("GET", "/read?path=" + encodeURIComponent(huge)), res);
+  ok(res.status === 413 && JSON.parse(res.body).error === "file-too-large", "reading an oversized file answers 413 file-too-large");
+
+  // An oversized request body is a 413 as well (it used to be reported as invalid-body).
+  res = mockRes();
+  await r2("/write").handler(mockReq("POST", "/write", { path: join(dir, "x.txt"), content: "y".repeat(5 * 1024 * 1024) }), res);
+  ok(res.status === 413 && JSON.parse(res.body).error === "body-too-large", "an oversized request body answers 413 body-too-large");
+
+  await rm(dir, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// Watcher: session roots are memoized (this runs on every session event, so it must not
+// touch the filesystem each time) but a folder that appears later is still picked up.
+console.log("== watcher: session-root memo ==");
+{
+  const live = await mkdtemp(join(tmpdir(), "cs-rootmemo-"));
+  const later = join(live, "appears-later");
+  const makeCtx = (sink) => {
+    let sessionHandler = null;
+    const ctx = {
+      effect(fn) { const d = fn(); return () => { if (typeof d === "function") d(); }; },
+      on(type, fn) { if (type === "session/event") sessionHandler = fn; return () => {}; },
+      get(name) { if (name === "sessions") return { list: () => [] }; return void 0; },
+      webServer: { register(route) { sink.push(route); return () => {}; } }
+    };
+    return { ctx, fire: (session) => sessionHandler?.(session, { type: "session/message", data: {} }) };
+  };
+  const rootsOf = async (routes4) => {
+    const res4 = mockRes();
+    await routes4.find((r) => r.path === PREFIX + "/workspaces").handler(mockReq("GET", "/workspaces"), res4);
+    return JSON.parse(res4.body).workspaces.map((w) => w.path);
+  };
+
+  // A long recheck window: the miss is remembered, so creating the folder does not make it
+  // appear instantly (that is the memo doing its job).
+  const slowRoutes = [];
+  const slow = makeCtx(slowRoutes);
+  process.env.DSH_HOME = PORT_HOME;
+  apply(slow.ctx, { pollIntervalMs: 10 ** 7, rootRecheckMs: 60_000 });
+  slow.fire({ id: "sRoot", header: { cwd: later } });
+  await fs2.mkdir(later, { recursive: true });
+  slow.fire({ id: "sRoot", header: { cwd: later } });
+  slow.fire({ id: "sRoot", header: { cwd: later } });
+  ok(!(await rootsOf(slowRoutes)).includes(later), "a missing root is not re-probed on every session event (memoized)");
+
+  // A zero recheck window: a negative probe is not remembered, so once the folder exists the
+  // very next event picks it up. (This is also what catches "cache the miss forever".)
+  const laterFast = join(live, "appears-later-fast");
+  const fastRoutes = [];
+  const fast = makeCtx(fastRoutes);
+  apply(fast.ctx, { pollIntervalMs: 10 ** 7, rootRecheckMs: 0 });
+  fast.fire({ id: "sFast", header: { cwd: laterFast } });   // not there yet -> negative probe
+  await fs2.mkdir(laterFast, { recursive: true });
+  fast.fire({ id: "sFast", header: { cwd: laterFast } });   // re-probe allowed -> must be picked up
+  fast.fire({ id: "sFast", header: { cwd: laterFast } });
+  const roots = await rootsOf(fastRoutes);
+  ok(roots.includes(laterFast), "a folder that appears later is picked up once the memo allows a re-probe");
+  ok(roots.filter((p) => p === laterFast).length === 1, "repeated events do not register the same root twice");
+  await rm(live, { recursive: true, force: true });
+}
 
 await rm(ROOT, { recursive: true, force: true });
 console.log("\n" + passed + " passed, " + failed + " failed");
