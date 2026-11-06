@@ -32,3 +32,13 @@ jobs:
       # deterministic render-cost guard: a re-render must not re-diff the change set
       - name: Panel render cost
         run: node scripts/perf-panel.mjs 60 120 local
+      # the windowed diff must render the same tree as the previous full-materialization
+      # implementation, in both layouts and at several scroll positions
+      - name: Diff view render equivalence
+        run: node scripts/render-equivalence.mjs
+      # the editor must window its gutter/highlight layers and keep the scroll height exact
+      - name: Editor window geometry
+        run: node scripts/editor-window.mjs
+      # created-file baseline, tab-stealing on agent edits, redundant connection notifications
+      - name: Change feed behaviour
+        run: node scripts/feed-behavior.mjs

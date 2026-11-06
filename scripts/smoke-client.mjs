@@ -173,4 +173,24 @@ if (/shownChanges\.reduce\(\(acc, c\) => \{ const s = c\.deleted/.test(code)) th
   if (out.c.length !== 1 || out.c[0] !== "const a = 1;") throw new Error("plain mode must emit the raw text without token spans");
 }
 
+// 7) v0.2.17 windowing + feed fixes. The diff viewer and the editor both stopped
+// materializing every row; losing these means the panel silently goes back to building tens
+// of thousands of elements per render.
+for (const [label, needle] of [
+  ["diff row spans", "function diffRowSpans(blocks)"],
+  ["single-row renderer", "function renderDiffRow(ops, i, rowKey, path, onLineClick)"],
+  ["windowed diff body", "windowRows.push(renderDiffRow("],
+  ["editor row height constant", "const EDIT_LINE_H = 18.6;"],
+  ["editor gutter spacer", 'spacer("gt", win.start)'],
+  ["editor highlight spacer", 'spacer("ht", win.start)'],
+  ["editor window measure", "const measure = () => {"],
+  ["created-file baseline", "existing !== void 0 ? existing.before : ev.before"],
+  ["automatic reveal is non-stealing", "if (fromUser === true) { setTab(\"changes\"); setExpandedPath(path); return; }"],
+  ["connection state guard", "if (feed.conn === state && feed.connText === nextText) return;"]
+]) if (!code.includes(needle)) throw new Error("lost a v0.2.17 guarantee: " + label + " (expected " + needle + ")");
+// the full-materialization renderer is gone on purpose; a re-introduction would quietly
+// undo the fix while every other test still passes
+if (code.includes("function renderDiffRows(")) throw new Error("the full diff materializer is back (rows must be windowed)");
+if (/for \(let i = 1; i <= lineCount; i\+\+\) gutter\.push/.test(code)) throw new Error("the editor renders the whole gutter again instead of a window");
+
 console.log("smoke OK: apply=" + typeof mod.apply + " inject=" + JSON.stringify(mod.inject) + " slots=" + injected.join(",") + " overlayOnly=" + injected2.join(",") + " headerPill=" + header.spec.id);
